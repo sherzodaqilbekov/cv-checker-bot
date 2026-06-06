@@ -1,11 +1,16 @@
 import asyncio
 import aiohttp
+import io
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BufferedInputFile
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.units import cm
 from config import BOT_TOKEN, OPENROUTER_API_KEY
 
 # Bot sozlash
@@ -18,6 +23,7 @@ class CVGenerator(StatesGroup):
     entering_category = State()
     entering_name = State()
     entering_education = State()
+    entering_direction = State()
     entering_experience = State()
     entering_skills = State()
     entering_languages = State()
@@ -31,6 +37,76 @@ def main_menu():
         ],
         resize_keyboard=True
     )
+
+# PDF yaratish funksiyasi
+def create_pdf(cv_text: str, name: str) -> bytes:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+    
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Title'],
+        fontSize=16,
+        spaceAfter=20,
+        fontName='Helvetica-Bold'
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=13,
+        spaceAfter=10,
+        spaceBefore=15,
+        fontName='Helvetica-Bold'
+    )
+    
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=11,
+        spaceAfter=6,
+        fontName='Helvetica',
+        leading=16
+    )
+    
+    story = []
+    lines = cv_text.split('\n')
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            story.append(Spacer(1, 6))
+            continue
+        
+        # Emoji va maxsus belgilarni tozalash
+        clean_line = ''
+        for char in line:
+            if ord(char) < 65536:
+                clean_line += char
+        clean_line = clean_line.strip()
+        
+        if not clean_line:
+            continue
+            
+        if any(keyword in clean_line.upper() for keyword in ['CURRICULUM VITAE', 'REZYUME', 'CV']):
+            story.append(Paragraph(clean_line, title_style))
+        elif clean_line.isupper() and len(clean_line) > 3:
+            story.append(Paragraph(clean_line, heading_style))
+        else:
+            story.append(Paragraph(clean_line, normal_style))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.read()
 
 # OpenRouter AI
 async def ask_ai(prompt: str) -> str:
@@ -46,7 +122,7 @@ async def ask_ai(prompt: str) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "Siz professional CV yozuvchi va tekshiruvchi AI assistentsiz."
+                "content": "Siz professional CV yozuvchi va tekshiruvchi AI assistentsiz. Barcha javoblaringiz O'zbek tilida bo'lsin."
             },
             {
                 "role": "user",
@@ -122,8 +198,8 @@ async def name_entered(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
     await state.set_state(CVGenerator.entering_education)
     await message.answer(
-        "🎓 Ta'limingizni kiriting:\n\n"
-        "Masalan: TATU, Kompyuter Injiniringi, 2020-2024\n\n"
+        "🎓 Ta'lim muassasangizni kiriting:\n\n"
+        "Masalan: TATU, 2020-2024\n\n"
         "Agar ta'lim yo'q bo'lsa: 'Maktab' deb yozing"
     )
 
@@ -131,10 +207,22 @@ async def name_entered(message: types.Message, state: FSMContext):
 @dp.message(CVGenerator.entering_education)
 async def education_entered(message: types.Message, state: FSMContext):
     await state.update_data(education=message.text)
+    await state.set_state(CVGenerator.entering_direction)
+    await message.answer(
+        "📚 Mutaxassisligingiz (yo'nalishingiz) ni kiriting:\n\n"
+        "Masalan: Kompyuter Injiniringi\n"
+        "Yoki: Tibbiyot, Iqtisodiyot, Huquqshunoslik\n\n"
+        "Agar yo'nalish yo'q bo'lsa: 'Yo'q' deb yozing"
+    )
+
+# Yo'nalish kiritildi
+@dp.message(CVGenerator.entering_direction)
+async def direction_entered(message: types.Message, state: FSMContext):
+    await state.update_data(direction=message.text)
     await state.set_state(CVGenerator.entering_experience)
     await message.answer(
         "💼 Ish tajribangizni kiriting:\n\n"
-        "Masalan: Amir restoranda 2 yil oshpaz bo'lib ishladim\n\n"
+        "Masalan: ABC kompaniyada 2 yil Python dasturchi\n\n"
         "Agar tajriba yo'q bo'lsa: 'Tajriba yo'q' deb yozing"
     )
 
@@ -145,8 +233,8 @@ async def experience_entered(message: types.Message, state: FSMContext):
     await state.set_state(CVGenerator.entering_skills)
     await message.answer(
         "🛠 Ko'nikmalaringizni kiriting:\n\n"
-        "Masalan: Milliy taomlar, Xalqaro oshpazlik, Gigiena\n\n"
-        "Yoki: Python, Django, SQL"
+        "Masalan: Python, Django, SQL, Git\n"
+        "Yoki: Milliy taomlar, Xalqaro oshpazlik"
     )
 
 # Ko'nikmalar kiritildi
@@ -170,33 +258,61 @@ async def languages_entered(message: types.Message, state: FSMContext):
 
     prompt = f"""
 Quyidagi ma'lumotlar asosida professional CV yoz.
-CV ingliz tilida bo'lsin, professional formatda:
+CV O'ZBEK TILIDA bo'lsin, professional formatda yoz.
+Hech qanday emoji ishlatma, faqat oddiy matn.
 
 Soha/Kasb: {data['category']}
 Ism: {data['name']}
-Ta'lim: {data['education']}
-Tajriba: {data['experience']}
+Ta'lim muassasasi: {data['education']}
+Mutaxassislik: {data['direction']}
+Ish tajribasi: {data['experience']}
 Ko'nikmalar: {data['skills']}
-Tillar: {data['languages']}
+Til bilimlari: {data['languages']}
 
 Quyidagi formatda yoz:
-━━━━━━━━━━━━━━━━━━━━
-📋 CURRICULUM VITAE
-━━━━━━━━━━━━━━━━━━━━
-👤 PERSONAL INFORMATION
-📚 EDUCATION
-💼 WORK EXPERIENCE
-🛠 SKILLS
-🌐 LANGUAGES
-━━━━━━━━━━━━━━━━━━━━
 
-CV ni to'liq, professional va chiroyli qilib yoz.
+REZYUME
+
+SHAXSIY MA'LUMOTLAR
+Ism-Familiya: ...
+Kasb: ...
+
+TA'LIM
+Ta'lim muassasasi: ...
+Mutaxassislik: ...
+O'qish yillari: ...
+
+ISH TAJRIBASI
+...
+
+KO'NIKMALAR
+...
+
+TIL BILIMLARI
+...
+
+CV ni to'liq, professional va chiroyli qilib yoz o'zbek tilida.
 Agar tajriba yo'q bo'lsa, ko'nikma va ta'limga ko'proq e'tibor ber.
 """
 
     try:
         cv_result = await ask_ai(prompt)
+
+        # Matn ko'rinishida yuborish
         await message.answer(f"✅ Sizning CVingiz tayyor!\n\n{cv_result}")
+
+        # PDF yaratish va yuborish
+        await message.answer("📄 PDF fayl tayyorlanmoqda...")
+        pdf_bytes = create_pdf(cv_result, data['name'])
+        pdf_file = BufferedInputFile(
+            pdf_bytes,
+            filename=f"CV_{data['name'].replace(' ', '_')}.pdf"
+        )
+        await message.answer_document(
+            pdf_file,
+            caption=f"📄 {data['name']} ning professional CVsi (PDF)"
+        )
+
         await message.answer(
             "🔄 Yana nima qilmoqchisiz?",
             reply_markup=main_menu()
@@ -220,17 +336,17 @@ async def check_cv(message: types.Message):
     await message.answer("⏳ CV tahlil qilinmoqda, biroz kuting...")
 
     prompt = f"""
-Quyidagi CVni tahlil qil va O'zbek tilida javob ber:
+Quyidagi CVni tahlil qil va O'ZBEK TILIDA javob ber:
 
 CV:
 {cv_text}
 
 Quyidagilarni tekshir:
-1. 📊 Umumiy ball (100 dan)
-2. ✅ Kuchli tomonlar
-3. ❌ Kamchiliklar
-4. 📝 Muhim bo'limlar bor-yo'qligi
-5. 💡 Tavsiyalar
+1. Umumiy ball (100 dan)
+2. Kuchli tomonlar
+3. Kamchiliklar
+4. Muhim bo'limlar bor-yo'qligi (Ta'lim, Tajriba, Ko'nikmalar)
+5. Tavsiyalar
 """
 
     try:
