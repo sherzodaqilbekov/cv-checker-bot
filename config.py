@@ -1,4 +1,4 @@
 import os
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8911937698:AAGfx7qm4IC1szH3ITQq2_m3FS8ImbPwfKI")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "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")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
