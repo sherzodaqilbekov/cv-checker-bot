@@ -308,9 +308,7 @@ Agar tajriba yoq bolsa, konikma va talimga koprok etibor ber.
 
     try:
         cv_result = await ask_ai(prompt)
-
         await message.answer(f"✅ Sizning CVingiz tayyor!\n\n{cv_result}")
-
         await message.answer("📄 PDF fayl tayyorlanmoqda...")
         pdf_bytes = create_pdf(cv_result, data['name'])
         pdf_file = BufferedInputFile(
@@ -321,13 +319,15 @@ Agar tajriba yoq bolsa, konikma va talimga koprok etibor ber.
             pdf_file,
             caption=f"📄 {data['name']} ning professional CVsi (PDF)"
         )
-
         await message.answer(
             "🔄 Yana nima qilmoqchisiz?",
             reply_markup=main_menu()
         )
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await message.answer(
+            "❌ Xatolik yuz berdi!\n\n"
+            "Iltimos, qaytadan urinib ko'ring yoki /start bosing."
+        )
 
 # CV Tekshirish - matn kelsa
 @dp.message()
@@ -337,7 +337,7 @@ async def check_cv(message: types.Message):
     if len(cv_text) < 50:
         await message.answer(
             "⚠️ CV juda qisqa!\n\n"
-            "Iltimos, toliq CV matnini yuboring.\n"
+            "Iltimos, to'liq CV matnini yuboring.\n"
             "Yoki /start bosib menyuga qayting."
         )
         return
@@ -366,7 +366,10 @@ Quyidagilarni tekshir:
             reply_markup=main_menu()
         )
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await message.answer(
+            "❌ Xatolik yuz berdi!\n\n"
+            "Iltimos, qaytadan urinib ko'ring yoki /start bosing."
+        )
 
 # Botni ishga tushirish
 async def main():
