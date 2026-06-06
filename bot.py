@@ -38,8 +38,20 @@ def main_menu():
         resize_keyboard=True
     )
 
+# O'zbek harflarini tuzatish
+def fix_uzbek(text):
+    replacements = {
+        "o'": "o`", "g'": "g`", "O'": "O`", "G'": "G`",
+        "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"'
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
+
 # PDF yaratish funksiyasi
 def create_pdf(cv_text: str, name: str) -> bytes:
+    cv_text = fix_uzbek(cv_text)
+    
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -87,17 +99,16 @@ def create_pdf(cv_text: str, name: str) -> bytes:
             story.append(Spacer(1, 6))
             continue
         
-        # Emoji va maxsus belgilarni tozalash
         clean_line = ''
         for char in line:
-            if ord(char) < 65536:
+            if ord(char) < 256:
                 clean_line += char
         clean_line = clean_line.strip()
         
         if not clean_line:
             continue
-            
-        if any(keyword in clean_line.upper() for keyword in ['CURRICULUM VITAE', 'REZYUME', 'CV']):
+        
+        if any(keyword in clean_line.upper() for keyword in ['REZYUME', 'CURRICULUM VITAE', 'CV']):
             story.append(Paragraph(clean_line, title_style))
         elif clean_line.isupper() and len(clean_line) > 3:
             story.append(Paragraph(clean_line, heading_style))
@@ -257,51 +268,49 @@ async def languages_entered(message: types.Message, state: FSMContext):
     await message.answer("⏳ CV yaratilmoqda, biroz kuting...")
 
     prompt = f"""
-Quyidagi ma'lumotlar asosida professional CV yoz.
-CV O'ZBEK TILIDA bo'lsin, professional formatda yoz.
+Quyidagi malumotlar asosida professional CV yoz.
+CV OZBEK TILIDA bolsin, professional formatda yoz.
 Hech qanday emoji ishlatma, faqat oddiy matn.
 
 Soha/Kasb: {data['category']}
 Ism: {data['name']}
-Ta'lim muassasasi: {data['education']}
+Talim muassasasi: {data['education']}
 Mutaxassislik: {data['direction']}
 Ish tajribasi: {data['experience']}
-Ko'nikmalar: {data['skills']}
+Konikmalar: {data['skills']}
 Til bilimlari: {data['languages']}
 
 Quyidagi formatda yoz:
 
 REZYUME
 
-SHAXSIY MA'LUMOTLAR
+SHAXSIY MALUMOTLAR
 Ism-Familiya: ...
 Kasb: ...
 
-TA'LIM
-Ta'lim muassasasi: ...
+TALIM
+Talim muassasasi: ...
 Mutaxassislik: ...
-O'qish yillari: ...
+Oqish yillari: ...
 
 ISH TAJRIBASI
 ...
 
-KO'NIKMALAR
+KONIKMALAR
 ...
 
 TIL BILIMLARI
 ...
 
-CV ni to'liq, professional va chiroyli qilib yoz o'zbek tilida.
-Agar tajriba yo'q bo'lsa, ko'nikma va ta'limga ko'proq e'tibor ber.
+CV ni toliq, professional va chiroyli qilib yoz ozbek tilida.
+Agar tajriba yoq bolsa, konikma va talimga koprok etibor ber.
 """
 
     try:
         cv_result = await ask_ai(prompt)
 
-        # Matn ko'rinishida yuborish
         await message.answer(f"✅ Sizning CVingiz tayyor!\n\n{cv_result}")
 
-        # PDF yaratish va yuborish
         await message.answer("📄 PDF fayl tayyorlanmoqda...")
         pdf_bytes = create_pdf(cv_result, data['name'])
         pdf_file = BufferedInputFile(
@@ -328,7 +337,7 @@ async def check_cv(message: types.Message):
     if len(cv_text) < 50:
         await message.answer(
             "⚠️ CV juda qisqa!\n\n"
-            "Iltimos, to'liq CV matnini yuboring.\n"
+            "Iltimos, toliq CV matnini yuboring.\n"
             "Yoki /start bosib menyuga qayting."
         )
         return
@@ -336,7 +345,7 @@ async def check_cv(message: types.Message):
     await message.answer("⏳ CV tahlil qilinmoqda, biroz kuting...")
 
     prompt = f"""
-Quyidagi CVni tahlil qil va O'ZBEK TILIDA javob ber:
+Quyidagi CVni tahlil qil va OZBEK TILIDA javob ber:
 
 CV:
 {cv_text}
@@ -345,7 +354,7 @@ Quyidagilarni tekshir:
 1. Umumiy ball (100 dan)
 2. Kuchli tomonlar
 3. Kamchiliklar
-4. Muhim bo'limlar bor-yo'qligi (Ta'lim, Tajriba, Ko'nikmalar)
+4. Muhim bolimlar bor-yoqligi (Talim, Tajriba, Konikmalar)
 5. Tavsiyalar
 """
 
