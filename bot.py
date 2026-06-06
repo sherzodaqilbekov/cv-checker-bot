@@ -11,9 +11,6 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.units import cm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-import os
 from config import BOT_TOKEN, OPENROUTER_API_KEY
 
 # Bot sozlash
@@ -41,43 +38,29 @@ def main_menu():
         resize_keyboard=True
     )
 
-# O'zbek harflarini oddiy lotin harflarga almashtirish (PDF uchun)
+# Unicode belgilarni tozalash
 def fix_uzbek(text):
     replacements = {
         "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"',
         "\u2014": "-", "\u2013": "-", "\u2026": "...",
-        # O'zbek maxsus harflarini o'xshash lotin harflarga almashtiramiz
-        "o\u2018": "o'", "g\u2018": "g'",
-        "O\u2018": "O'", "G\u2018": "G'",
-        "\u0490": "G'", "\u0491": "g'",  # Cyrillic G with upturn
-        "\u2019": "'",
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
     return text
 
-# Matnni PDF uchun xavfsiz qilish (ASOSIY TO'G'IRLASH)
+# PDF uchun xavfsiz matn
 def make_pdf_safe(text):
-    """
-    O'zbek lotin harflarini saqlab, faqat PDF ko'tarolmaydigan
-    maxsus Unicode belgilarni almashtiradi
-    """
     result = []
     for char in text:
         code = ord(char)
-        # Oddiy ASCII harflar - qabul qilamiz
-        if code < 128:
+        if code < 512:
             result.append(char)
-        # O'zbek lotin harflari va keng tarqalgan Lotin-1 harflar
-        elif code < 512:
-            result.append(char)
-        # Boshqa Unicode - o'chiramiz
         else:
             result.append('?')
     return ''.join(result)
 
-# PDF yaratish funksiyasi (TO'G'IRLANGAN)
-def create_pdf(cv_text: str, name: str) -> bytes:
+# PDF yaratish funksiyasi
+def create_pdf(cv_text: str, filename_hint: str) -> bytes:
     cv_text = fix_uzbek(cv_text)
 
     buffer = io.BytesIO()
@@ -127,16 +110,20 @@ def create_pdf(cv_text: str, name: str) -> bytes:
             story.append(Spacer(1, 6))
             continue
 
-        # ESKI KOD O'RNIGA - to'g'ri tozalash
         clean_line = make_pdf_safe(line).strip()
-
         if not clean_line:
             continue
 
-        if any(keyword in clean_line.upper() for keyword in ['REZYUME', 'CURRICULUM VITAE', 'CV']):
+        if any(keyword in clean_line.upper() for keyword in ['REZYUME', 'CURRICULUM VITAE', 'TAHLIL', 'CV TAHLIL']):
             story.append(Paragraph(clean_line, title_style))
         elif clean_line.isupper() and len(clean_line) > 3:
             story.append(Paragraph(clean_line, heading_style))
+        elif clean_line.startswith('#'):
+            clean_line = clean_line.replace('#', '').strip()
+            story.append(Paragraph(clean_line, heading_style))
+        elif clean_line.startswith('*') or clean_line.startswith('-'):
+            clean_line = clean_line.lstrip('*- ').strip()
+            story.append(Paragraph('• ' + clean_line, normal_style))
         else:
             story.append(Paragraph(clean_line, normal_style))
 
@@ -296,7 +283,6 @@ async def languages_entered(message: types.Message, state: FSMContext):
 Quyidagi malumotlar asosida professional CV yoz.
 CV OZBEK TILIDA bolsin, professional formatda yoz.
 Hech qanday emoji ishlatma, faqat oddiy matn.
-Apostraf belgisi sifatida faqat oddiy (') belgisini ishlatma, o'rniga (`) yoki harf ketma-ketligini ishlat.
 
 Soha/Kasb: {data['category']}
 Ism: {data['name']}
@@ -329,7 +315,6 @@ TIL BILIMLARI
 ...
 
 CV ni toliq, professional va chiroyli qilib yoz ozbek tilida.
-Agar tajriba yoq bolsa, konikma va talimga koprok etibor ber.
 """
 
     try:
@@ -355,7 +340,7 @@ Agar tajriba yoq bolsa, konikma va talimga koprok etibor ber.
             "Iltimos, qaytadan urinib ko'ring yoki /start bosing."
         )
 
-# CV Tekshirish - matn kelsa
+# CV Tekshirish - matn kelsa (PDF ham yuboradi)
 @dp.message()
 async def check_cv(message: types.Message):
     cv_text = message.text
@@ -371,22 +356,60 @@ async def check_cv(message: types.Message):
     await message.answer("⏳ CV tahlil qilinmoqda, biroz kuting...")
 
     prompt = f"""
-Quyidagi CVni tahlil qil va OZBEK TILIDA javob ber:
+Quyidagi CVni tahlil qil va OZBEK TILIDA javob ber.
+Hech qanday emoji ishlatma, faqat oddiy matn va raqamlar.
 
 CV:
 {cv_text}
 
-Quyidagilarni tekshir:
-1. Umumiy ball (100 dan)
-2. Kuchli tomonlar
-3. Kamchiliklar
-4. Muhim bolimlar bor-yoqligi (Talim, Tajriba, Konikmalar)
-5. Tavsiyalar
+Quyidagi formatda yoz:
+
+CV TAHLIL NATIJALARI
+
+UMUMIY BALL
+Ball: .../100
+Izoh: ...
+
+KUCHLI TOMONLAR
+1. ...
+2. ...
+3. ...
+
+KAMCHILIKLAR
+1. ...
+2. ...
+3. ...
+
+MUHIM BOLIMLAR
+Talim: bor/yoq
+Tajriba: bor/yoq
+Konikmalar: bor/yoq
+Til bilimlari: bor/yoq
+
+TAVSIYALAR
+1. ...
+2. ...
+3. ...
+
+XULOSA
+...
 """
 
     try:
         result = await ask_ai(prompt)
         await message.answer(result)
+
+        # PDF ham yuborish
+        await message.answer("📄 Tahlil PDF formatda tayyorlanmoqda...")
+        pdf_bytes = create_pdf(result, "CV_Tahlil")
+        pdf_file = BufferedInputFile(
+            pdf_bytes,
+            filename="CV_Tahlil_Natijalari.pdf"
+        )
+        await message.answer_document(
+            pdf_file,
+            caption="📄 CV tahlil natijalari (PDF)"
+        )
         await message.answer(
             "🔄 Yana nima qilmoqchisiz?",
             reply_markup=main_menu()
