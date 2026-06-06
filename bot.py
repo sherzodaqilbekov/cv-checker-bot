@@ -11,6 +11,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os
 from config import BOT_TOKEN, OPENROUTER_API_KEY
 
 # Bot sozlash
@@ -38,20 +41,45 @@ def main_menu():
         resize_keyboard=True
     )
 
-# O'zbek harflarini tuzatish
+# O'zbek harflarini oddiy lotin harflarga almashtirish (PDF uchun)
 def fix_uzbek(text):
     replacements = {
-        "o'": "o`", "g'": "g`", "O'": "O`", "G'": "G`",
-        "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"'
+        "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"',
+        "\u2014": "-", "\u2013": "-", "\u2026": "...",
+        # O'zbek maxsus harflarini o'xshash lotin harflarga almashtiramiz
+        "o\u2018": "o'", "g\u2018": "g'",
+        "O\u2018": "O'", "G\u2018": "G'",
+        "\u0490": "G'", "\u0491": "g'",  # Cyrillic G with upturn
+        "\u2019": "'",
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
     return text
 
-# PDF yaratish funksiyasi
+# Matnni PDF uchun xavfsiz qilish (ASOSIY TO'G'IRLASH)
+def make_pdf_safe(text):
+    """
+    O'zbek lotin harflarini saqlab, faqat PDF ko'tarolmaydigan
+    maxsus Unicode belgilarni almashtiradi
+    """
+    result = []
+    for char in text:
+        code = ord(char)
+        # Oddiy ASCII harflar - qabul qilamiz
+        if code < 128:
+            result.append(char)
+        # O'zbek lotin harflari va keng tarqalgan Lotin-1 harflar
+        elif code < 512:
+            result.append(char)
+        # Boshqa Unicode - o'chiramiz
+        else:
+            result.append('?')
+    return ''.join(result)
+
+# PDF yaratish funksiyasi (TO'G'IRLANGAN)
 def create_pdf(cv_text: str, name: str) -> bytes:
     cv_text = fix_uzbek(cv_text)
-    
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -61,9 +89,9 @@ def create_pdf(cv_text: str, name: str) -> bytes:
         topMargin=2*cm,
         bottomMargin=2*cm
     )
-    
+
     styles = getSampleStyleSheet()
-    
+
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Title'],
@@ -71,7 +99,7 @@ def create_pdf(cv_text: str, name: str) -> bytes:
         spaceAfter=20,
         fontName='Helvetica-Bold'
     )
-    
+
     heading_style = ParagraphStyle(
         'CustomHeading',
         parent=styles['Heading2'],
@@ -80,7 +108,7 @@ def create_pdf(cv_text: str, name: str) -> bytes:
         spaceBefore=15,
         fontName='Helvetica-Bold'
     )
-    
+
     normal_style = ParagraphStyle(
         'CustomNormal',
         parent=styles['Normal'],
@@ -89,32 +117,29 @@ def create_pdf(cv_text: str, name: str) -> bytes:
         fontName='Helvetica',
         leading=16
     )
-    
+
     story = []
     lines = cv_text.split('\n')
-    
+
     for line in lines:
         line = line.strip()
         if not line:
             story.append(Spacer(1, 6))
             continue
-        
-        clean_line = ''
-        for char in line:
-            if ord(char) < 256:
-                clean_line += char
-        clean_line = clean_line.strip()
-        
+
+        # ESKI KOD O'RNIGA - to'g'ri tozalash
+        clean_line = make_pdf_safe(line).strip()
+
         if not clean_line:
             continue
-        
+
         if any(keyword in clean_line.upper() for keyword in ['REZYUME', 'CURRICULUM VITAE', 'CV']):
             story.append(Paragraph(clean_line, title_style))
         elif clean_line.isupper() and len(clean_line) > 3:
             story.append(Paragraph(clean_line, heading_style))
         else:
             story.append(Paragraph(clean_line, normal_style))
-    
+
     doc.build(story)
     buffer.seek(0)
     return buffer.read()
@@ -147,7 +172,7 @@ async def ask_ai(prompt: str) -> str:
             if "choices" in result:
                 return result["choices"][0]["message"]["content"]
             else:
-                return f"❌ Xatolik: {result}"
+                return f"Xatolik: {result}"
 
 # /start
 @dp.message(Command("start"))
@@ -223,7 +248,7 @@ async def education_entered(message: types.Message, state: FSMContext):
         "📚 Mutaxassisligingiz (yo'nalishingiz) ni kiriting:\n\n"
         "Masalan: Kompyuter Injiniringi\n"
         "Yoki: Tibbiyot, Iqtisodiyot, Huquqshunoslik\n\n"
-        "Agar yo'nalish yo'q bo'lsa: 'Yo'q' deb yozing"
+        "Agar yo'nalish yo'q bo'lsa: Yo'q deb yozing"
     )
 
 # Yo'nalish kiritildi
@@ -234,7 +259,7 @@ async def direction_entered(message: types.Message, state: FSMContext):
     await message.answer(
         "💼 Ish tajribangizni kiriting:\n\n"
         "Masalan: ABC kompaniyada 2 yil Python dasturchi\n\n"
-        "Agar tajriba yo'q bo'lsa: 'Tajriba yo'q' deb yozing"
+        "Agar tajriba yo'q bo'lsa: Tajriba yoq deb yozing"
     )
 
 # Tajriba kiritildi
@@ -271,6 +296,7 @@ async def languages_entered(message: types.Message, state: FSMContext):
 Quyidagi malumotlar asosida professional CV yoz.
 CV OZBEK TILIDA bolsin, professional formatda yoz.
 Hech qanday emoji ishlatma, faqat oddiy matn.
+Apostraf belgisi sifatida faqat oddiy (') belgisini ishlatma, o'rniga (`) yoki harf ketma-ketligini ishlat.
 
 Soha/Kasb: {data['category']}
 Ism: {data['name']}
@@ -325,7 +351,7 @@ Agar tajriba yoq bolsa, konikma va talimga koprok etibor ber.
         )
     except Exception as e:
         await message.answer(
-            "❌ Xatolik yuz berdi!\n\n"
+            f"❌ Xatolik yuz berdi: {str(e)}\n\n"
             "Iltimos, qaytadan urinib ko'ring yoki /start bosing."
         )
 
@@ -367,7 +393,7 @@ Quyidagilarni tekshir:
         )
     except Exception as e:
         await message.answer(
-            "❌ Xatolik yuz berdi!\n\n"
+            f"❌ Xatolik yuz berdi: {str(e)}\n\n"
             "Iltimos, qaytadan urinib ko'ring yoki /start bosing."
         )
 
